@@ -23,7 +23,13 @@ const PatentList = ({ account, signer }) => {
       const patentRegistry = new ethers.Contract(PATENT_REGISTRY_ADDRESS, PATENT_REGISTRY_ABI, signer);
 
       // 获取用户拥有的专利NFT数量
-      const balance = await patentToken.balanceOf(account);
+      const balanceBn = await patentToken.balanceOf(account);
+      const balance = Number(balanceBn);
+
+      if (balance === 0) {
+        setPatents([]);
+        return;
+      }
       
       const userPatents = [];
       
@@ -31,11 +37,23 @@ const PatentList = ({ account, signer }) => {
       for (let i = 0; i < balance; i++) {
         try {
           const tokenId = await patentToken.tokenOfOwnerByIndex(account, i);
-          const patentInfo = await patentToken.getPatentInfo(tokenId);
+          const [
+            patentNumber,
+            title,
+            inventor,
+            filingDate,
+            grantDate,
+            royaltyPercentage
+          ] = await patentToken.getPatentInfo(tokenId);
           
           userPatents.push({
             tokenId: tokenId.toString(),
-            ...patentInfo
+            patentNumber,
+            title,
+            inventor,
+            filingDate: Number(filingDate),
+            grantDate: Number(grantDate),
+            royaltyPercentage: Number(royaltyPercentage)
           });
         } catch (error) {
           console.error(`Error loading patent ${i}:`, error);
