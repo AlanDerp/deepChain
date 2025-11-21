@@ -81,18 +81,26 @@ const PatentMinter = ({ signer }) => {
       );
       
       await registerTx.wait();
-      setResult(prev => prev + `\n✅ Patent registered in registry!`);
+      const recordId = await patentRegistry.getRecordIdByHash(patentHash);
+      setResult(prev => prev + `\n✅ Patent registered in registry! Record ID: ${recordId.toString()}`);
 
-      // 3. 更新专利状态为已授权
-      const updateTx = await patentRegistry.updatePatentStatus(
-        1, // 假设这是第一个记录
-        1, // GRANTED
-        grantTimestamp,
-        grantTimestamp + 86400 * 365 * 20 // 20年有效期
-      );
-      
-      await updateTx.wait();
-      setResult(prev => prev + `\n✅ Patent status updated to GRANTED!`);
+      // 3. 如果当前钱包是Registry owner，则更新专利状态为已授权
+      const registryOwner = await patentRegistry.owner();
+      const caller = await signer.getAddress();
+
+      if (caller.toLowerCase() === registryOwner.toLowerCase()) {
+        const updateTx = await patentRegistry.updatePatentStatus(
+          recordId,
+          1, // GRANTED
+          grantTimestamp,
+          grantTimestamp + 86400 * 365 * 20 // 20年有效期
+        );
+        
+        await updateTx.wait();
+        setResult(prev => prev + `\n✅ Patent status updated to GRANTED!`);
+      } else {
+        setResult(prev => prev + `\nℹ️ Patent registered. Registry owner must grant the status. Owner: ${registryOwner}`);
+      }
 
       // 重置表单
       setFormData({
@@ -219,7 +227,7 @@ const PatentMinter = ({ signer }) => {
             onChange={handleChange}
             placeholder="ipfs:// or https:// metadata URI"
           />
-          <small>Location of patent metadata (optional)</small>
+          <small>Location  of patent metadata (optional)</small>
         </div>
 
         <button 
