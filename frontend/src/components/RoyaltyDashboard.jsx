@@ -39,7 +39,12 @@ const RoyaltyDashboard = ({ account, signer }) => {
           
           patents.push({
             tokenId: tokenId.toString(),
-            ...patentInfo,
+            patentNumber: patentInfo.patentNumber || patentInfo[0] || '',
+            title: patentInfo.title || patentInfo[1] || '',
+            inventor: patentInfo.inventor || patentInfo[2] || '',
+            filingDate: patentInfo.filingDate || patentInfo[3] || 0,
+            grantDate: patentInfo.grantDate || patentInfo[4] || 0,
+            royaltyPercentage: Number(patentInfo.royaltyPercentage || patentInfo[5] || 0),
             shares: shares
           });
         } catch (error) {
@@ -49,6 +54,7 @@ const RoyaltyDashboard = ({ account, signer }) => {
       setMyPatents(patents);
     } catch (error) {
       console.error('Error loading patents:', error);
+      setMyPatents([]);
     }
   };
 
@@ -56,7 +62,11 @@ const RoyaltyDashboard = ({ account, signer }) => {
     try {
       const royaltyDistribution = new ethers.Contract(ROYALTY_DISTRIBUTION_ADDRESS, ROYALTY_DISTRIBUTION_ABI, signer);
       const shares = await royaltyDistribution.getRevenueShares(tokenId);
-      return shares;
+      // Convert BigInt to regular numbers for percentages
+      return shares.map(share => ({
+        recipient: share.recipient,
+        sharePercentage: Number(share.sharePercentage)
+      }));
     } catch (error) {
       console.error(`Error loading revenue shares for token ${tokenId}:`, error);
       return [];
@@ -186,7 +196,7 @@ const RoyaltyDashboard = ({ account, signer }) => {
                   onChange={handleDistributionFormChange}
                   required
                 >
-                  <option value="">Choose a patent</option>
+                  <option value="" disabled hidden>Choose a patent</option>
                   {myPatents.map(patent => (
                     <option key={patent.tokenId} value={patent.tokenId}>
                       {patent.patentNumber} - {patent.title}

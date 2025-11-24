@@ -44,7 +44,12 @@ const LicenseMarket = ({ signer }) => {
           const patentInfo = await patentToken.getPatentInfo(tokenId);
           patents.push({
             tokenId: tokenId.toString(),
-            ...patentInfo
+            patentNumber: patentInfo[0],
+            title: patentInfo[1],
+            inventor: patentInfo[2],
+            filingDate: patentInfo[3],
+            grantDate: patentInfo[4],
+            royaltyPercentage: patentInfo[5]
           });
         } catch (error) {
           console.error(`Error loading patent ${i}:`, error);
@@ -57,19 +62,78 @@ const LicenseMarket = ({ signer }) => {
   };
 
   const loadAvailableLicenses = async () => {
-    // 这里简化实现，实际应该从合约事件或列表中获取
-    setAvailableLicenses([
-      {
-        licenseId: 1,
-        patentTokenId: 1,
-        title: "Blockchain-based Patent Management System",
-        licensor: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
-        licenseType: 1,
-        fieldOfUse: "Software Development",
-        licenseFee: ethers.parseEther("1.0"),
-        duration: 31536000 // 1 year in seconds
+    try {
+      const licenseManager = new ethers.Contract(LICENSE_MANAGER_ADDRESS, LICENSE_MANAGER_ABI, signer);
+      const patentToken = new ethers.Contract(PATENT_TOKEN_ADDRESS, PATENT_TOKEN_ABI, signer);
+      
+      // 获取 LicenseCreated 事件
+      const filter = licenseManager.filters.LicenseCreated();
+      const events = await licenseManager.queryFilter(filter);
+      
+      const licenses = [];
+      
+      // 遍历所有许可证创建事件
+      for (const event of events) {
+        try {
+          const licenseId = event.args.licenseId;
+          
+          // 获取许可证详情
+          const [
+            patentTokenId,
+            licensor,
+            licensee,
+            licenseType,
+            fieldOfUse,
+            licenseFee,
+            startDate,
+            duration,
+            status,
+            isPaid
+          ] = await licenseManager.getLicenseAgreement(licenseId);
+          
+          // 显示所有未支付且状态为ACTIVE(0)的许可证
+          if (!isPaid && status === 0) {
+            // 获取专利信息以显示标题
+            try {
+              const patentInfo = await patentToken.getPatentInfo(patentTokenId);
+              // getPatentInfo returns a tuple: [patentNumber, title, inventor, filingDate, grantDate, royaltyPercentage]
+              licenses.push({
+                licenseId: licenseId.toString(),
+                patentTokenId: patentTokenId.toString(),
+                title: patentInfo[1], // title is the second element
+                licensor: licensor,
+                licensee: licensee,
+                licenseType: Number(licenseType),
+                fieldOfUse: fieldOfUse,
+                licenseFee: licenseFee,
+                duration: Number(duration)
+              });
+            } catch (error) {
+              console.error(`Error loading patent info for token ${patentTokenId}:`, error);
+              // 即使获取专利信息失败，也添加许可证（使用默认标题）
+              licenses.push({
+                licenseId: licenseId.toString(),
+                patentTokenId: patentTokenId.toString(),
+                title: `Patent #${patentTokenId}`,
+                licensor: licensor,
+                licensee: licensee,
+                licenseType: Number(licenseType),
+                fieldOfUse: fieldOfUse,
+                licenseFee: licenseFee,
+                duration: Number(duration)
+              });
+            }
+          }
+        } catch (error) {
+          console.error(`Error loading license ${event.args.licenseId}:`, error);
+        }
       }
-    ]);
+      
+      setAvailableLicenses(licenses);
+    } catch (error) {
+      console.error('Error loading available licenses:', error);
+      setAvailableLicenses([]);
+    }
   };
 
   const handleLicenseFormChange = (e) => {
@@ -104,8 +168,30 @@ const LicenseMarket = ({ signer }) => {
         duration
       );
 
-      await tx.wait();
-      setResult(`✅ License created successfully! License ID: pending...`);
+      const receipt = await tx.wait();
+      
+      // 从事件中获取 licenseId
+      const licenseCreatedEvent = receipt.logs.find(
+        log => {
+          try {
+            const parsed = licenseManager.interface.parseLog(log);
+            return parsed && parsed.name === 'LicenseCreated';
+          } catch {
+            return false;
+          }
+        }
+      );
+      
+      let licenseId = 'N/A';
+      if (licenseCreatedEvent) {
+        const parsed = licenseManager.interface.parseLog(licenseCreatedEvent);
+        licenseId = parsed.args.licenseId.toString();
+      }
+      
+      setResult(`License created successfully! License ID: ${licenseId}`);
+      
+      // 刷新可用许可证列表
+      await loadAvailableLicenses();
 
       // 重置表单
       setLicenseForm({
@@ -143,6 +229,9 @@ const LicenseMarket = ({ signer }) => {
 
       await tx.wait();
       setResult(`✅ License purchased successfully! License ID: ${licenseId}`);
+      
+      // 刷新可用许可证列表
+      await loadAvailableLicenses();
 
     } catch (error) {
       console.error('Error purchasing license:', error);
@@ -199,7 +288,7 @@ const LicenseMarket = ({ signer }) => {
                   onChange={handleLicenseFormChange}
                   required
                 >
-                  <option value="">Choose a patent</option>
+                  <option value="" disabled hidden>Choose a patent</option>
                   {myPatents.map(patent => (
                     <option key={patent.tokenId} value={patent.tokenId}>
                       {patent.patentNumber} - {patent.title}
