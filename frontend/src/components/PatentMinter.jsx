@@ -39,7 +39,80 @@ const PatentMinter = ({ signer }) => {
     setResult('');
 
     try {
-      // ... 原有的铸造逻辑保持不变
+           // 创建合约实例
+      const patentToken = new ethers.Contract(PATENT_TOKEN_ADDRESS, PATENT_TOKEN_ABI, signer);
+      const patentRegistry = new ethers.Contract(PATENT_REGISTRY_ADDRESS, PATENT_REGISTRY_ABI, signer);
+
+      // 生成唯一的tokenId（使用时间戳）
+      const tokenId = Math.floor(Date.now() / 1000);
+      
+      // 转换日期为时间戳
+      const filingTimestamp = Math.floor(new Date(formData.filingDate).getTime() / 1000);
+      const grantTimestamp = Math.floor(new Date(formData.grantDate).getTime() / 1000);
+      
+      // 计算版税百分比（基础点）
+      const royaltyBasisPoints = parseInt(formData.royaltyPercentage) * 100;
+
+      // 1. 铸造专利NFT
+      const mintTx = await patentToken.mintPatent(
+        await signer.getAddress(),
+        tokenId,
+        formData.tokenURI,
+        formData.patentNumber,
+        formData.title,
+        formData.inventor,
+        filingTimestamp,
+        grantTimestamp,
+        royaltyBasisPoints
+      );
+      
+      await mintTx.wait();
+      setResult(`✅ Patent NFT minted successfully! Token ID: ${tokenId}`);
+
+      // 2. 在注册表中注册专利
+      const patentHash = ethers.keccak256(ethers.toUtf8Bytes(formData.description));
+      const registerTx = await patentRegistry.registerPatent(
+        patentHash,
+        formData.patentNumber,
+        formData.title,
+        formData.description,
+        filingTimestamp,
+        tokenId
+      );
+      
+      await registerTx.wait();
+      const recordId = await patentRegistry.getRecordIdByHash(patentHash);
+      setResult(prev => prev + `\n✅ Patent registered in registry! Record ID: ${recordId.toString()}`);
+
+      // 3. 如果当前钱包是Registry owner，则更新专利状态为已授权
+      const registryOwner = await patentRegistry.owner();
+      const caller = await signer.getAddress();
+
+      if (caller.toLowerCase() === registryOwner.toLowerCase()) {
+        const updateTx = await patentRegistry.updatePatentStatus(
+          recordId,
+          1, // GRANTED
+          grantTimestamp,
+          grantTimestamp + 86400 * 365 * 20 // 20年有效期
+        );
+        
+        await updateTx.wait();
+        setResult(prev => prev + `\n✅ Patent status updated to GRANTED!`);
+      } else {
+        setResult(prev => prev + `\nℹ️ Patent registered. Registry owner must grant the status. Owner: ${registryOwner}`);
+      }
+
+      // 重置表单
+      setFormData({
+        patentNumber: '',
+        title: '',
+        inventor: '',
+        description: '',
+        filingDate: '',
+        grantDate: '',
+        royaltyPercentage: '5',
+        tokenURI: 'ipfs://'
+      });
     } catch (error) {
       console.error('Error minting patent:', error);
       setResult(`❌ Error: ${error.message}`);
